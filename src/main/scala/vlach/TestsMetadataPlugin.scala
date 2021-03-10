@@ -11,15 +11,16 @@ import xsbti.VirtualFileRef
 object TestsMetadataPlugin extends AutoPlugin {
 
   case class TestData(test: String, sourceFile: String)
-  case class ProjectData(
+  case class ProjectMetadata(
       project: String,
       base: String,
       definedTest: Seq[TestData],
       sourceDirectories: Seq[String]
   )
-  case class TestsMetadata(baseDirectory: String, projects: Seq[ProjectData])
+  case class TestsMetadata(baseDirectory: String, projects: Seq[ProjectMetadata])
 
   object TestsMetadata {
+    val empty = TestsMetadata("", List.empty[ProjectMetadata])
     implicit val writer: JsonWriter[TestsMetadata] = new JsonWriter[TestsMetadata] {
       override def write[J](obj: TestsMetadata, builder: Builder[J]): Unit = {
         builder.beginObject()
@@ -53,81 +54,59 @@ object TestsMetadataPlugin extends AutoPlugin {
     }
   }
 
-  //override def requires = sbt.plugins.JvmPlugin
   override def trigger = allRequirements
 
+  val testsMetadataKey = AttributeKey[TestsMetadata]("tests metadata")
+
   object autoImport {
-    val testRunnerData =
-      settingKey[TestsMetadata]("Tests files information.").withRank(KeyRanks.Invisible)
+    val testsMetadata        = taskKey[TestsMetadata]("Retrieve tests metadata.")
+    val testsMetadataRefresh = taskKey[StateTransform]("Refresh tests metadata information.")
   }
+
   import autoImport._
 
   override lazy val globalSettings = Seq(
-    commands += Command.command("pipa")(refreshTestRunnerData),
-    testRunnerData := TestsMetadata(
-      (ThisBuild / baseDirectory).value.getAbsolutePath,
-      List.empty[ProjectData]
-    )
-  )
+    testsMetadata := state.value.get(testsMetadataKey).getOrElse(TestsMetadata.empty),
+    testsMetadataRefresh := StateTransform { state =>
+      val extracted: Extracted = Project.extract(state)
 
-  val refreshTestRunnerData: State => State = s => {
+      val structure = extracted.structure
 
-    val extracted: Extracted = Project.extract(s)
+      val newTestRunnerData: List[ProjectMetadata] =
+        structure.allProjectRefs.foldLeft(List.empty[ProjectMetadata]) { case (acc, projectRef) =>
+          val testToSource: Map[String, String] =
+            Project.runTask(projectRef / Test / compile, state) match {
+              case None                       => Map.empty[String, String]
+              case Some((newState, Inc(inc))) => Map.empty[String, String]
+              case Some((newState, Value(analysis))) =>
+                analysis match {
+                  case analysis: Analysis =>
+                    val relations: Traversable[(VirtualFileRef, String)] = analysis.relations.classes.all
+                    relations.map { case (virtualFileRef, string) => string -> virtualFileRef.id }.toMap
+                }
+            }
 
-    val structure = extracted.structure
+          val projectSourceDirectories = (Test / sourceDirectories in projectRef)
+            .get(structure.data)
+            .fold(Seq.empty[String])(_.map(_.getAbsolutePath))
 
-    val newTestRunnerData: List[ProjectData] =
-      structure.allProjectRefs.foldLeft(List.empty[ProjectData]) { case (acc, projectRef) =>
-        val base = Project.getProject(projectRef, structure).fold("")(_.base.getAbsolutePath)
+          def toTestData(testDefinition: TestDefinition): TestData =
+            TestData(testDefinition.name, testToSource.getOrElse(testDefinition.name, ""))
 
-        val testDefinitionForProject: Option[(State, Result[Seq[TestDefinition]])] =
-          Project.runTask(projectRef / Test / definedTests, s)
-        val analysisO: Option[(State, Result[CompileAnalysis])] =
-          Project.runTask(projectRef / Test / compile, s)
-
-        val testToSource: Map[String, String] =
-          analysisO match {
-            case None                       => Map.empty[String, String]
-            case Some((newState, Inc(inc))) => Map.empty[String, String]
-            case Some((newState, Value(analysis))) =>
-              analysis match {
-                case analysis: Analysis =>
-                  val relations: Traversable[(VirtualFileRef, String)] =
-                    analysis.relations.classes.all
-                  relations.map { case (virtualFileRef, string) =>
-                    string -> virtualFileRef.id
-                  }.toMap
-              }
+          Project.runTask(projectRef / Test / definedTests, state) match {
+            case None                       => acc
+            case Some((newState, Inc(inc))) => acc
+            case Some((newState, Value(v))) =>
+              val base = Project.getProject(projectRef, structure).fold("")(_.base.getAbsolutePath)
+              acc :+ ProjectMetadata(projectRef.project, base, v.map(toTestData), projectSourceDirectories)
           }
-
-        val projectSourceDirectories = (Test / sourceDirectories in projectRef)
-          .get(structure.data)
-          .fold(Seq.empty[String])(_.map(_.getAbsolutePath))
-
-        def toTestData(testDefinition: TestDefinition): TestData =
-          TestData(testDefinition.name, testToSource.getOrElse(testDefinition.name, ""))
-
-        testDefinitionForProject match {
-          case None => acc // Key wasn't defined.
-          case Some((newState, Inc(inc))) =>
-            acc // error detail, inc is of type Incomplete, use Incomplete.show(inc.tpe) to get an error message
-          case Some((newState, Value(v))) =>
-            acc :+ ProjectData(
-              projectRef.project,
-              base,
-              v.map(toTestData),
-              projectSourceDirectories
-            )
         }
-      }
 
-    val newState = extracted.appendWithoutSession(
-      Seq(
-        Global / testRunnerData := (Global / testRunnerData).value
-          .copy(projects = newTestRunnerData)
-      ),
-      s
-    )
-    newState
-  }
+      state.update(testsMetadataKey)(
+        _.fold(TestsMetadata((ThisBuild / baseDirectory).value.getAbsolutePath, newTestRunnerData))(
+          _.copy(projects = newTestRunnerData)
+        )
+      )
+    }
+  )
 }
