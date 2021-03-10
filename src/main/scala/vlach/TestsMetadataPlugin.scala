@@ -56,23 +56,21 @@ object TestsMetadataPlugin extends AutoPlugin {
 
   override def trigger = allRequirements
 
-  val testsMetadataKey = AttributeKey[TestsMetadata]("tests metadata")
-
   object autoImport {
-    val testsMetadata        = taskKey[TestsMetadata]("Retrieve tests metadata.")
+    val testsMetadata        = settingKey[TestsMetadata]("Tests metadata.")
     val testsMetadataRefresh = taskKey[StateTransform]("Refresh tests metadata information.")
   }
 
   import autoImport._
 
   override lazy val globalSettings = Seq(
-    testsMetadata := state.value.get(testsMetadataKey).getOrElse(TestsMetadata.empty),
+    testsMetadata := TestsMetadata((ThisBuild / baseDirectory).value.getAbsolutePath, List.empty),
     testsMetadataRefresh := StateTransform { state =>
       val extracted: Extracted = Project.extract(state)
 
       val structure = extracted.structure
 
-      val newTestRunnerData: List[ProjectMetadata] =
+      val projectsMetadata: List[ProjectMetadata] =
         structure.allProjectRefs.foldLeft(List.empty[ProjectMetadata]) { case (acc, projectRef) =>
           val testToSource: Map[String, String] =
             Project.runTask(projectRef / Test / compile, state) match {
@@ -102,10 +100,11 @@ object TestsMetadataPlugin extends AutoPlugin {
           }
         }
 
-      state.update(testsMetadataKey)(
-        _.fold(TestsMetadata((ThisBuild / baseDirectory).value.getAbsolutePath, newTestRunnerData))(
-          _.copy(projects = newTestRunnerData)
-        )
+      val globalTestsMetadata: SettingKey[TestsMetadata] = Global / testsMetadata
+
+      extracted.appendWithoutSession(
+        Seq(globalTestsMetadata := globalTestsMetadata.value.copy(projects = projectsMetadata)),
+        state
       )
     }
   )
