@@ -6,7 +6,7 @@ import sbt.internal.inc._
 import sjsonnew.{Builder, JsonWriter}
 import sjsonnew.BasicJsonProtocol._
 
-case class TestData(test: String, sourceFile: String)
+case class TestData(test: String, sourceFile: String, suite: String)
 case class ProjectMetadata(
     project: String,
     base: String,
@@ -33,6 +33,7 @@ object TestsMetadata {
           builder.beginObject()
           builder.addField("test", definedTest.test)
           builder.addField("source", definedTest.sourceFile)
+          builder.addField("suite", definedTest.suite)
           builder.endObject()
         }
         builder.endArray()
@@ -76,8 +77,11 @@ trait TestsMetadataCommon { this: AutoPlugin =>
           .get(structure.data)
           .fold(Seq.empty[String])(_.map(_.getAbsolutePath))
 
-        def toTestData(testDefinition: TestDefinition): TestData =
-          TestData(testDefinition.name, testToSource.getOrElse(testDefinition.name, ""))
+        def toTestData(testDefinition: TestDefinition): TestData = {
+          val isMunitSuite = TestFramework.toString(testDefinition.fingerprint).contains("munit.Suite")
+          val suite        = if (isMunitSuite) "munit" else "unknown"
+          TestData(testDefinition.name, testToSource.getOrElse(testDefinition.name, ""), suite)
+        }
 
         Project.runTask(projectRef / Test / definedTests, state) match {
           case None                       => acc
