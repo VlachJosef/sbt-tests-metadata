@@ -53,6 +53,23 @@ object TestsMetadata {
 
 trait TestsMetadataCommon { this: AutoPlugin =>
 
+  override def trigger = allRequirements
+
+  object autoImport {
+    val testsMetadata = settingKey[TestsMetadata]("Tests metadata.")
+  }
+
+  import autoImport._
+
+  override lazy val globalSettings = Seq(
+    testsMetadata := TestsMetadata((ThisBuild / baseDirectory).value.getAbsolutePath, List.empty),
+    commands += testsMetadataRefresh
+  )
+
+  def testsMetadataRefresh = Command.command("testsMetadataRefresh") { state =>
+    updateTestsMetadata(state, Global / testsMetadata)
+  }
+
   def classToPathMapping(analysis: Analysis): Map[String, String]
 
   def updateTestsMetadata(state: State, globalTestsMetadata: SettingKey[TestsMetadata]): State = {
@@ -63,32 +80,34 @@ trait TestsMetadataCommon { this: AutoPlugin =>
 
     val projectsMetadata: List[ProjectMetadata] =
       structure.allProjectRefs.foldLeft(List.empty[ProjectMetadata]) { case (acc, projectRef) =>
-        val testToSource: Map[String, String] =
-          Project.runTask(projectRef / Test / compile, state) match {
-            case None                       => Map.empty[String, String]
-            case Some((newState, Inc(inc))) => Map.empty[String, String]
-            case Some((newState, Value(analysis))) =>
-              analysis match {
-                case analysis: Analysis => classToPathMapping(analysis)
-              }
-          }
-
-        val projectSourceDirectories = (Test / sourceDirectories in projectRef)
-          .get(structure.data)
-          .fold(Seq.empty[String])(_.map(_.getAbsolutePath))
-
-        def toTestData(testDefinition: TestDefinition): TestData = {
-          val isMunitSuite = TestFramework.toString(testDefinition.fingerprint).contains("munit.Suite")
-          val suite        = if (isMunitSuite) "munit" else "unknown"
-          TestData(testDefinition.name, testToSource.getOrElse(testDefinition.name, ""), suite)
-        }
-
         Project.runTask(projectRef / Test / definedTests, state) match {
           case None                       => acc
           case Some((newState, Inc(inc))) => acc
           case Some((newState, Value(v))) =>
-            val base = Project.getProject(projectRef, structure).fold("")(_.base.getAbsolutePath)
-            acc :+ ProjectMetadata(projectRef.project, base, v.map(toTestData), projectSourceDirectories)
+            if (v.isEmpty) acc
+            else {
+              val testToSource: Map[String, String] =
+                Project.runTask(projectRef / Test / compile, state) match {
+                  case None                       => Map.empty[String, String]
+                  case Some((newState, Inc(inc))) => Map.empty[String, String]
+                  case Some((newState, Value(analysis))) =>
+                    analysis match {
+                      case analysis: Analysis => classToPathMapping(analysis)
+                    }
+                }
+
+              def toTestData(testDefinition: TestDefinition): TestData = {
+                val isMunitSuite = TestFramework.toString(testDefinition.fingerprint).contains("munit.Suite")
+                val suite        = if (isMunitSuite) "munit" else "unknown"
+                TestData(testDefinition.name, testToSource.getOrElse(testDefinition.name, ""), suite)
+              }
+
+              val projectSourceDirectories = (projectRef / Test / sourceDirectories)
+                .get(structure.data)
+                .fold(Seq.empty[String])(_.map(_.getAbsolutePath))
+              val base = Project.getProject(projectRef, structure).fold("")(_.base.getAbsolutePath)
+              acc :+ ProjectMetadata(projectRef.project, base, v.map(toTestData), projectSourceDirectories)
+            }
         }
       }
 
@@ -96,12 +115,5 @@ trait TestsMetadataCommon { this: AutoPlugin =>
       Seq(globalTestsMetadata := globalTestsMetadata.value.copy(projects = projectsMetadata)),
       state
     )
-  }
-
-  override def trigger = allRequirements
-
-  object autoImport {
-    val testsMetadata        = settingKey[TestsMetadata]("Tests metadata.")
-    val testsMetadataRefresh = taskKey[StateTransform]("Refresh tests metadata information.")
   }
 }

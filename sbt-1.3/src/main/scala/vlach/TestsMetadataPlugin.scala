@@ -1,8 +1,7 @@
 package vlach
 
 import java.io.File
-import sbt._
-import Keys._
+import sbt.AutoPlugin
 import sbt.internal.inc.Analysis
 
 object TestsMetadataPlugin extends AutoPlugin with TestsMetadataCommon {
@@ -13,11 +12,4 @@ object TestsMetadataPlugin extends AutoPlugin with TestsMetadataCommon {
       classFqn -> virtualFileRef.getAbsolutePath
     }.toMap
   }
-
-  import autoImport._
-
-  override lazy val globalSettings = Seq(
-    testsMetadata := TestsMetadata((ThisBuild / baseDirectory).value.getAbsolutePath, List.empty),
-    testsMetadataRefresh := new StateTransform(updateTestsMetadata(state.value, Global / testsMetadata))
-  )
 }
