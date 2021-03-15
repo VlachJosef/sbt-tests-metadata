@@ -16,7 +16,6 @@ case class ProjectMetadata(
 case class TestsMetadata(baseDirectory: String, projects: Seq[ProjectMetadata])
 
 object TestsMetadata {
-  val empty = TestsMetadata("", List.empty[ProjectMetadata])
   implicit val writer: JsonWriter[TestsMetadata] = new JsonWriter[TestsMetadata] {
     override def write[J](obj: TestsMetadata, builder: Builder[J]): Unit = {
       builder.beginObject()
@@ -67,12 +66,12 @@ trait TestsMetadataCommon { this: AutoPlugin =>
   )
 
   def testsMetadataRefresh = Command.command("testsMetadataRefresh") { state =>
-    updateTestsMetadata(state, Global / testsMetadata)
+    updateTestsMetadata(state)
   }
 
   def classToPathMapping(analysis: Analysis): Map[String, String]
 
-  def updateTestsMetadata(state: State, globalTestsMetadata: SettingKey[TestsMetadata]): State = {
+  def updateTestsMetadata(state: State): State = {
 
     val extracted: Extracted = Project.extract(state)
 
@@ -111,8 +110,12 @@ trait TestsMetadataCommon { this: AutoPlugin =>
         }
       }
 
+    val globalMetadata = Global / testsMetadata
+
     extracted.appendWithoutSession(
-      Seq(globalTestsMetadata := globalTestsMetadata.value.copy(projects = projectsMetadata)),
+      Seq(
+        globalMetadata := globalMetadata.value.copy(projects = projectsMetadata)
+      ),
       state
     )
   }
