@@ -1,10 +1,11 @@
-package vlach
+package io.github.vlachjosef
 
 import sbt._
 import Keys._
 import sbt.internal.inc._
 import sjsonnew.{Builder, JsonWriter}
 import sjsonnew.BasicJsonProtocol._
+import xsbti.VirtualFileRef
 
 case class TestData(test: String, sourceFile: String, suite: String)
 case class ProjectMetadata(
@@ -50,7 +51,7 @@ object TestsMetadata {
   }
 }
 
-trait TestsMetadataCommon { this: AutoPlugin =>
+object TestsMetadataPlugin extends AutoPlugin {
 
   override def trigger = allRequirements
 
@@ -69,7 +70,12 @@ trait TestsMetadataCommon { this: AutoPlugin =>
     updateTestsMetadata(state)
   }
 
-  def classToPathMapping(analysis: Analysis): Map[String, String]
+  def classToPathMapping(analysis: Analysis): Map[String, String] = {
+    val relations: Traversable[(VirtualFileRef, String)] = analysis.relations.classes.all
+    relations.map { case (virtualFileRef, classFqn) =>
+      classFqn -> virtualFileRef.id
+    }.toMap
+  }
 
   def updateTestsMetadata(state: State): State = {
 
