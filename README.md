@@ -8,7 +8,7 @@ Plugin to support running Scala tests from Emacs.
 Easiest way to enable `sbt-tests-metadata` plugin is adding following line into global `~/.sbt/1.0/plugins/plugins.sbt` file:
 
 ```
-addSbtPlugin("io.github.vlachjosef" % "sbt-tests-metadata" % "0.1.0-SNAPSHOT")
+addSbtPlugin("io.github.vlachjosef" % "sbt-tests-metadata" % "0.1.0")
 ```
 
 ## Usage
